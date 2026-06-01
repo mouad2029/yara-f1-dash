@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Yara Dash Game 🏎️</title>
+<style>
+  /* ---------- Global look & feel ---------- */
+  :root {
+    --bg1: #ff6ec7;
+    --bg2: #ffd166;
+    --bg3: #06d6a0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+    background: linear-gradient(135deg, var(--bg1), var(--bg2), var(--bg3));
+    background-size: 400% 400%;
+    animation: bgShift 18s ease infinite;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    touch-action: none;
+  }
+  @keyframes bgShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  #wrap {
+    position: relative;
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* Canvas scales to screen but keeps aspect via JS */
+  canvas {
+    display: block;
+    background: #2b2b3a;
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+    max-width: 100%; max-height: 100%;
+  }
+  /* Tiny hint at the bottom */
+  #hint {
+    position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.85); font-size: 12px; text-shadow: 0 1px 2px #000;
+    pointer-events: none; text-align: center; width: 100%;
+  }
+  /* Meme GIF overlay (hotlinked from the internet) */
+  #gifLayer {
+    position: absolute; left: 50%; top: 30%;
+    transform: translate(-50%, -50%) scale(0.9);
+    max-width: 46%; max-height: 30%;
+    pointer-events: none; opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    border-radius: 14px; box-shadow: 0 8px 26px rgba(0,0,0,0.5);
+    border: 3px solid #fff; z-index: 5; background: #000;
+  }
+  #gifLayer.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <img id="gifLayer" alt="" />
+  <div id="hint">Arrow keys / WASD to move · SPACE to start · Tap top/bottom on mobile</div>
+</div>
+
+<script>
+/* =====================================================================
+   Yara's F1 Birthday Dash 🏎️
+   A single-file, offline, vanilla-JS canvas game.
+   Top-down lane dodger / endless runner. Cute & funny F1 birthday gift.
+   ===================================================================== */
+
+(function () {
+  "use strict";
+
+  /* =====================================================================
+     👇👇👇  PASTE YOUR FUNNY MEME GIF LINKS HERE  👇👇👇
+     ---------------------------------------------------------------------
+     These are loaded from the internet, so the game needs Wi-Fi to show
+     them. Each value must be a DIRECT image link that ends in .gif
+     (right-click a GIF on Giphy/Tenor → "Copy image address").
+
+       Example of a GOOD link:  https://media.giphy.com/media/xxxx/giphy.gif
+       A page link (giphy.com/gifs/...) will NOT work — needs the .gif file.
+
+     Leave a slot as "" to show no GIF for that event. If a link is dead
+     or there's no internet, the game just skips it and keeps running.
+     ===================================================================== */
+  const GIFS = {
+    start:    "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExenVoMzZ1anUxNnNwM3FwZDd4Ynh1NHhiOTg5ajZkOXV2emM4YTFyNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/aN9ntC1mOwnxEMguGN/giphy.gif",   // pops up right when the race begins
+    boost:    "",   // shown when she grabs the 🚀 boost
+    // "crash" can be an array — a random one is picked each time she hits something.
+    crash: [
+      "https://media.giphy.com/media/NAivbJDbjN9sgkLzzE/giphy.gif",
+      "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2h2eHRiYmFibTZlYjVycWNhYmI1ZGZhM2x3dHI0cXF5eGt2NmZlNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Q5bEJQgv4kheOhlMXs/giphy.gif",
+      "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExc3B1OTBnMDJ3eTVubGJ0Y3ZxdGFjMXBpM2lnNWxrcGVvNDA5dW1jdyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PsH4jzUxfpwKWzPp7o/giphy.gif",
+    ],
+    score67:  "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjczc25vd3J3b2hvOHBiczNyNGQwdm9mYjVlYmJ1dG03NmxicGYwMyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/j9EbOM05JSzqYaB3up/giphy.gif", // pops at score 67
+    // "random" is also a pool — a random one pops up mid-race.
+    random: [
+      "https://media.giphy.com/media/Ij5kcfI6YwcPCN26U2/giphy.gif",
+      "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExZDU2NjVtcWVuYXUzZ25qZTFhOHdldWxpcWluZXl3OWlmcnVsMDdhcyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/BTalFlagA1QZv3dv6M/giphy.gif",
+    ],
+    birthday: "",   // shown on the secret score-2210 celebration
+    gameover: "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExY3MwenZsamUydjZrNjk0cWQ5ZzNucXNoYWs2OWZ6Njgyd3Brcmt1ciZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1GU8lkcF6iNYvhfc9X/giphy.gif", // the "you died" screen
+  };
+
+  // ---------- GIF overlay control ----------
+  const gifLayer = document.getElementById("gifLayer");
+  let gifTimer = null;
+  // Hide the broken-image icon if a link fails / there's no internet.
+  gifLayer.addEventListener("error", function () { hideGif(); });
+  function showGif(key, seconds) {
+    let url = GIFS[key];
+    // A slot can be an array of links — pick a random one each time.
+    if (Array.isArray(url)) {
+      const pool = url.filter(Boolean);
+      if (!pool.length) { hideGif(); return; }
+      url = pool[(Math.random() * pool.length) | 0];
+    }
+    if (!url) { hideGif(); return; }
+    if (gifTimer) { clearTimeout(gifTimer); gifTimer = null; }
+    if (gifLayer.getAttribute("src") !== url) gifLayer.src = url;
+    gifLayer.classList.add("show");
+    if (seconds && seconds > 0) {
+      gifTimer = setTimeout(hideGif, seconds * 1000);
+    }
+  }
+  function hideGif() {
+    if (gifTimer) { clearTimeout(gifTimer); gifTimer = null; }
+    gifLayer.classList.remove("show");
+  }
+
+  // Collect every GIF link (flattening the array slots) into one pool.
+  function allGifUrls() {
+    const all = [];
+    for (const k in GIFS) {
+      const v = GIFS[k];
+      if (Array.isArray(v)) { for (const u of v) if (u) all.push(u); }
+      else if (v) all.push(v);
+    }
+    return all;
+  }
+
+  // "GIF STORM" — spam a bunch of GIFs all over the screen at once.
+  let spamEls = [];
+  function clearSpam() {
+    for (const el of spamEls) el.remove();
+    spamEls = [];
+  }
+  function spamGifs(count, durationMs) {
+    const pool = allGifUrls();
+    if (!pool.length) return;
+    const wrap = document.getElementById("wrap");
+    clearSpam();
+    for (let i = 0; i < (count || 16); i++) {
+      const img = document.createElement("img");
+      img.src = pool[(Math.random() * pool.length) | 0];
+      img.onerror = function () { this.style.display = "none"; };  // skip dead/offline links
+      const size = 16 + Math.random() * 22;            // size in vw
+      const rot = (Math.random() * 40 - 20) | 0;
+      img.style.cssText =
+        "position:absolute;width:" + size + "vw;max-width:230px;" +
+        "left:" + (5 + Math.random() * 85) + "%;top:" + (5 + Math.random() * 82) + "%;" +
+        "transform:translate(-50%,-50%) rotate(" + rot + "deg);" +
+        "border:3px solid #fff;border-radius:10px;" +
+        "box-shadow:0 6px 18px rgba(0,0,0,0.5);pointer-events:none;z-index:20;";
+      wrap.appendChild(img);
+      spamEls.push(img);
+    }
+    setTimeout(clearSpam, durationMs || 4500);
+  }
+
+  // ---------- Canvas setup ----------
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  // Logical (design) resolution. We render to this, then scale to screen.
+  const W = 480;          // logical width
+  const H = 800;          // logical height
+  canvas.width = W;
+  canvas.height = H;
+
+  // Fit the canvas into the window while keeping aspect ratio.
+  function fitCanvas() {
+    const pad = 16;
+    const availW = window.innerWidth - pad;
+    const availH = window.innerHeight - pad;
+    const scale = Math.min(availW / W, availH / H);
+    canvas.style.width = (W * scale) + "px";
+    canvas.style.height = (H * scale) + "px";
+  }
+  window.addEventListener("resize", fitCanvas);
+  fitCanvas();
+
+  // ---------- Game constants ----------
+  const LANES = 4;                       // number of lanes
+  const ROAD_LEFT = 60;                  // road margin
+  const ROAD_RIGHT = W - 60;
+  const ROAD_W = ROAD_RIGHT - ROAD_LEFT;
+  const LANE_W = ROAD_W / LANES;
+  const CAR_W = 46;
+  const CAR_H = 78;
+
+  // Lane center X for a given lane index.
+  function laneX(i) { return ROAD_LEFT + LANE_W * i + LANE_W / 2; }
+
+  // ---------- Game state ----------
+  const STATE = { START: 0, PLAY: 1, OVER: 2 };
+  let state = STATE.START;
+
+  let score = 0;
+  let highScore = 0;            // session only — NO localStorage on purpose
+  let birthdayTriggered = false;
+
+  // Lives / hearts
+  const MAX_LIVES = 3;
+  let lives = MAX_LIVES;
+  let invuln = 0;              // seconds of post-hit invincibility (blink)
+
+  // Boost availability (keep it rare & not spammy)
+  let boostCooldown = 0;       // seconds until another boost may spawn
+
+  // GIF triggers
+  let gif67Done = false;       // score-67 GIF fires once per run
+  let randomGifTimer = 0;      // counts down to the next random GIF
+  let nextSpamScore = 5000;    // GIF STORM fires every 5000 points
+
+  // Player car
+  const car = {
+    lane: 1,
+    x: laneX(1),
+    y: H - 150,
+    targetX: laneX(1),
+    tilt: 0,                    // visual lean while changing lanes
+  };
+
+  // World scroll & speed
+  let baseSpeed = 4;            // road scroll speed (px per frame @60fps)
+  let speed = baseSpeed;
+  let roadOffset = 0;
+  let elapsed = 0;             // seconds since run start
+
+  // Spawning
+  let spawnTimer = 0;
+  let obstacles = [];          // {x,y,lane,type,emoji,r}
+  let collectibles = [];       // {x,y,lane,type,emoji,r}
+
+  // Combo / dodge tracking
+  let dodgeStreak = 0;
+
+  // Boost power-up
+  let boostTime = 0;           // seconds of boost remaining
+  let rainbowTrail = [];       // trail points during boost
+
+  // Idle detection
+  let idleTimer = 0;           // seconds since last input
+  let idleNagged = false;
+
+  // ---------- Popups (big animated reaction text) ----------
+  let popups = [];             // {text, t, life, color, big}
+  function popup(text, opts) {
+    opts = opts || {};
+    popups.push({
+      text: text,
+      t: 0,
+      life: opts.life || 1.4,
+      color: opts.color || "#fff",
+      big: opts.big || false,
+    });
+  }
+
+  // Screen shake
+  let shake = 0;
+
+  // Confetti for birthday easter egg
+  let confetti = [];
+  let flash = 0;               // white screen flash amount 0..1
+
+  // ---------- Quotes ----------
+  const QUOTES = [
+    "Yara, you are P1! 🏁",
+    "Get in there Yaraaaa!",
+    "Box box box for cake 🎂",
+    "Leave me alone, I know what I'm doing 🙄",
+    "Smooth operator 😎",
+    "To be the best, you gotta beat the best!",
+    "Lights out and away we go! 🚦",
+    "It's lovely jubbly! 🍊",
+    "Hammer time, Yara! 🔨",
+    "Yara is faster than you. Can you confirm? 📻",
+    "GP2 engine... GP2! ARGH! 😤",
+    "Simply lovely 😌",
+    "We are checking 🤓",
+    "No, no, no, Yara, NO! 🙈",
+    "Bono, my tyres are gone 🛞",
+    "Multi 22, Yara 👀",
+    "Plenty of time, plenty of time ⏱️",
+    "Did we just win?? WE WON! 🍾",
+    "That's not bad, that's terrible 💀",
+    "Yara, you've gotta be kidding me 🤡",
+    "Smooth like Sunday morning ☕",
+    "Tyres are gripping, ego is flying 🚀",
+    "Purple sector, purple queen 💜",
+    "Easy mate, you've done it 🥇",
+  ];
+  let quote = QUOTES[0];
+  let quoteTimer = 0;
+  function nextQuote() {
+    quote = QUOTES[(Math.random() * QUOTES.length) | 0];
+  }
+
+  // ---------- Obstacle & collectible types ----------
+  const OBSTACLES = [
+    { type: "banana", emoji: "🍌" },
+    { type: "duck",   emoji: "🦆" },
+    { type: "cone",   emoji: "🚧" },
+    { type: "oil",    emoji: "🛢️" },
+    { type: "turtle", emoji: "🐢" },
+    { type: "snail",  emoji: "🐌" },
+    { type: "poop",   emoji: "💩" },
+    { type: "tyre",   emoji: "🛞" },
+    { type: "skull",  emoji: "☠️" },
+    { type: "goose",  emoji: "🪿" },
+    { type: "bomb",   emoji: "💣" },
+    { type: "pizza",  emoji: "🍕" },
+  ];
+  // Main pickups are stars and plates. Hearts are rarer and restore a life.
+  const COLLECTS = [
+    { type: "star",   emoji: "⭐", points: 60 },
+    { type: "star2",  emoji: "🌟", points: 60 },
+    { type: "plate2210", emoji: "22/10", points: 100, plate: true },
+    { type: "plate3107", emoji: "31/07", points: 100, plate: true },
+  ];
+
+  // ---------- Web Audio (optional, degrades gracefully) ----------
+  let audioCtx = null;
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type || "square";
+      o.frequency.value = freq;
+      g.gain.value = vol || 0.08;
+      o.connect(g); g.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+      o.start(now);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+      o.stop(now + dur);
+    } catch (e) { /* ignore */ }
+  }
+  function sfxCollect() { beep(660, 0.12, "square", 0.07); beep(990, 0.1, "square", 0.05); }
+  function sfxCrash()   { beep(120, 0.35, "sawtooth", 0.12); }
+  function sfxBoost()   { beep(440, 0.15, "sine", 0.08); beep(880, 0.15, "sine", 0.07); beep(1320, 0.2, "sine", 0.06); }
+
+  // ---------- Input ----------
+  function moveLane(dir) {
+    if (state !== STATE.PLAY) return;
+    const nl = Math.max(0, Math.min(LANES - 1, car.lane + dir));
+    if (nl !== car.lane) {
+      car.lane = nl;
+      car.targetX = laneX(nl);
+      car.tilt = dir * 0.35;
+    }
+    resetIdle();
+  }
+  function resetIdle() { idleTimer = 0; idleNagged = false; }
+
+  function startOrRestart() {
+    initAudio();
+    if (state === STATE.START || state === STATE.OVER) {
+      resetGame();
+      state = STATE.PLAY;
+    }
+  }
+
+  // Keyboard
+  window.addEventListener("keydown", function (e) {
+    const k = e.key.toLowerCase();
+    if (k === " " || k === "spacebar" || e.code === "Space") {
+      e.preventDefault();
+      startOrRestart();
+      return;
+    }
+    if (state !== STATE.PLAY) return;
+    if (k === "arrowleft" || k === "a") { e.preventDefault(); moveLane(-1); }
+    else if (k === "arrowright" || k === "d") { e.preventDefault(); moveLane(1); }
+    // Up/down also nudge lanes (feels natural for a vertical road)
+    else if (k === "arrowup" || k === "w") { e.preventDefault(); moveLane(-1); }
+    else if (k === "arrowdown" || k === "s") { e.preventDefault(); moveLane(1); }
+  });
+
+  // Touch / click: tap left half = move left, right half = move right.
+  // (Road is vertical, so left/right lane changes make sense.)
+  function handlePoint(clientX, clientY) {
+    if (state !== STATE.PLAY) { startOrRestart(); return; }
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    if (x < rect.width / 2) moveLane(-1);
+    else moveLane(1);
+  }
+  canvas.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    initAudio();
+    const t = e.changedTouches[0];
+    handlePoint(t.clientX, t.clientY);
+  }, { passive: false });
+  canvas.addEventListener("mousedown", function (e) {
+    initAudio();
+    handlePoint(e.clientX, e.clientY);
+  });
+
+  // ---------- Reset ----------
+  function resetGame() {
+    score = 0;
+    lives = MAX_LIVES;
+    invuln = 0;
+    boostCooldown = 0;
+    gif67Done = false;
+    randomGifTimer = 15 + Math.random() * 12;   // first random GIF after ~15-27s
+    nextSpamScore = 5000;
+    clearSpam();
+    birthdayTriggered = false;
+    car.lane = 1;
+    car.x = car.targetX = laneX(1);
+    car.tilt = 0;
+    baseSpeed = 4;
+    speed = baseSpeed;
+    roadOffset = 0;
+    elapsed = 0;
+    spawnTimer = 0;
+    obstacles = [];
+    collectibles = [];
+    dodgeStreak = 0;
+    boostTime = 0;
+    rainbowTrail = [];
+    idleTimer = 0; idleNagged = false;
+    popups = [];
+    shake = 0;
+    confetti = [];
+    flash = 0;
+    nextQuote();
+  }
+
+  // ---------- Spawning ----------
+  function spawn() {
+    // Decide what to spawn. Mostly obstacles, sometimes collectibles,
+    // rarely a boost. Keep it forgiving: never fully block all lanes.
+    const r = Math.random();
+    const lane = (Math.random() * LANES) | 0;
+
+    // Boost: very rare AND gated by a cooldown so it never feels spammy.
+    if (boostCooldown <= 0 && r < 0.03) {
+      boostCooldown = 14;   // at least ~14s between boost spawns
+      collectibles.push({
+        x: laneX(lane), y: -40, lane: lane,
+        type: "boost", emoji: "🚀", points: 0, r: 22, boost: true,
+        bob: Math.random() * Math.PI * 2,
+      });
+    } else if (r < 0.085 && lives < MAX_LIVES) {
+      // Heart pickup — rare, only useful when a life is missing. Restores 1 ❤️.
+      collectibles.push({
+        x: laneX(lane), y: -40, lane: lane,
+        type: "heart", emoji: "❤️", points: 0, r: 20, heart: true,
+        bob: Math.random() * Math.PI * 2,
+      });
+    } else if (r < 0.45) {
+      // Collectible (stars & plates)
+      const c = COLLECTS[(Math.random() * COLLECTS.length) | 0];
+      collectibles.push({
+        x: laneX(lane), y: -40, lane: lane,
+        type: c.type, emoji: c.emoji, points: c.points,
+        plate: !!c.plate, r: 20, bob: Math.random() * Math.PI * 2,
+      });
+    } else {
+      // Obstacle(s) — spawn 1, occasionally 2 (but never all lanes blocked)
+      const count = Math.random() < 0.25 ? 2 : 1;
+      const used = {};
+      for (let i = 0; i < count; i++) {
+        let ln = (Math.random() * LANES) | 0;
+        let tries = 0;
+        while (used[ln] && tries < 8) { ln = (Math.random() * LANES) | 0; tries++; }
+        if (used[ln]) continue;
+        used[ln] = true;
+        const o = OBSTACLES[(Math.random() * OBSTACLES.length) | 0];
+        obstacles.push({
+          x: laneX(ln), y: -40, lane: ln,
+          type: o.type, emoji: o.emoji, r: 22, scored: false,
+          spin: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+  }
+
+  // ---------- Collision helper ----------
+  function hit(a, ax, ay, ar) {
+    const dx = a.x - ax;
+    const dy = a.y - ay;
+    const rr = a.r + ar;
+    return (dx * dx + dy * dy) < (rr * rr);
+  }
+
+  // ---------- Birthday easter egg ----------
+  function triggerBirthday() {
+    birthdayTriggered = true;
+    flash = 1;
+    showGif("birthday", 4.0);
+    shake = Math.max(shake, 14);
+    // Burst of confetti
+    for (let i = 0; i < 160; i++) {
+      confetti.push({
+        x: Math.random() * W,
+        y: -Math.random() * H,
+        vx: (Math.random() - 0.5) * 3,
+        vy: 2 + Math.random() * 4,
+        size: 4 + Math.random() * 7,
+        color: "hsl(" + ((Math.random() * 360) | 0) + ",90%,60%)",
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.3,
+      });
+    }
+    sfxBoost();
+  }
+
+  // ---------- Update ----------
+  let last = performance.now();
+  function update(dt) {
+    // dt in seconds (clamped for stability)
+    quoteTimer += dt;
+    if (quoteTimer > 3.2) { quoteTimer = 0; nextQuote(); }
+
+    // Update popups
+    for (let i = popups.length - 1; i >= 0; i--) {
+      popups[i].t += dt;
+      if (popups[i].t >= popups[i].life) popups.splice(i, 1);
+    }
+    // Decay shake & flash
+    shake *= Math.pow(0.001, dt);
+    if (shake < 0.2) shake = 0;
+    flash = Math.max(0, flash - dt * 1.2);
+
+    // Update confetti always (so birthday burst finishes even on game over)
+    for (let i = confetti.length - 1; i >= 0; i--) {
+      const c = confetti[i];
+      c.x += c.vx; c.y += c.vy; c.vy += 0.05; c.rot += c.vr;
+      if (c.y > H + 20) confetti.splice(i, 1);
+    }
+
+    if (state !== STATE.PLAY) return;
+
+    elapsed += dt;
+
+    // Tick timers
+    if (boostCooldown > 0) boostCooldown -= dt;
+    if (invuln > 0) invuln -= dt;
+
+    // Idle nag
+    idleTimer += dt;
+    if (idleTimer > 6 && !idleNagged) {
+      popup("Are you sleeping?? 😴 GO GO GO", { life: 2.0, color: "#ffe066" });
+      idleNagged = true;
+    }
+
+    // Boost handling
+    if (boostTime > 0) {
+      boostTime -= dt;
+      speed = baseSpeed * 2.6;
+      // record rainbow trail
+      rainbowTrail.push({ x: car.x, y: car.y + CAR_H / 2, t: 0 });
+      if (boostTime <= 0) { boostTime = 0; }
+    } else {
+      speed = baseSpeed;
+    }
+    // age trail
+    for (let i = rainbowTrail.length - 1; i >= 0; i--) {
+      rainbowTrail[i].t += dt;
+      if (rainbowTrail[i].t > 0.6) rainbowTrail.splice(i, 1);
+    }
+
+    // Difficulty ramps slowly & gently
+    baseSpeed = 4 + Math.min(6, elapsed * 0.12);
+
+    // Score climbs with time (faster while boosting)
+    score += dt * (boostTime > 0 ? 110 : 60);
+    const intScore = Math.floor(score);
+
+    // Score-67 GIF moment (fires once)
+    if (!gif67Done && intScore >= 67) {
+      gif67Done = true;
+      showGif("score67", 2.5);
+      popup("67! 😏", { life: 1.4, color: "#9bf6ff", big: true });
+    }
+
+    // Random meme GIF every so often
+    randomGifTimer -= dt;
+    if (randomGifTimer <= 0) {
+      randomGifTimer = 18 + Math.random() * 16;   // again in ~18-34s
+      showGif("random", 2.2);
+    }
+
+    // GIF STORM at every high-score milestone (5000, 10000, ...)
+    if (intScore >= nextSpamScore) {
+      nextSpamScore += 5000;
+      spamGifs(18, 4500);
+      popup("🔥 GIF STORM!! 🔥", { life: 2.5, color: "#ffe066", big: true });
+      shake = Math.max(shake, 10);
+      sfxBoost();
+    }
+
+    // Birthday easter egg at exactly 2210
+    if (!birthdayTriggered && intScore >= 2210 && intScore <= 2215) {
+      triggerBirthday();
+    }
+
+    // Scroll road
+    roadOffset = (roadOffset + speed) % 80;
+
+    // Smoothly move car toward target lane
+    car.x += (car.targetX - car.x) * Math.min(1, dt * 14);
+    car.tilt *= Math.pow(0.0001, dt);
+
+    // Spawn cadence (gets a touch quicker over time, but stays forgiving)
+    spawnTimer += dt;
+    const spawnEvery = Math.max(0.55, 1.05 - elapsed * 0.01);
+    if (spawnTimer >= spawnEvery) {
+      spawnTimer = 0;
+      spawn();
+    }
+
+    // Move & test obstacles
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      const o = obstacles[i];
+      o.y += speed;
+      o.spin += dt * 4;
+
+      // Collision with car
+      if (hit(o, car.x, car.y, CAR_W * 0.32)) {
+        if (boostTime > 0) {
+          // Smash through while boosting — funny!
+          popup("Outta my way! 💨", { life: 0.8, color: "#fff" });
+          obstacles.splice(i, 1);
+          continue;
+        }
+        if (invuln > 0) {
+          // Still blinking from last hit — ignore so she can't lose all hearts at once
+          continue;
+        }
+        // Lose a heart (not instant game over)
+        crash(o);
+        obstacles.splice(i, 1);
+        if (lives <= 0) return;   // game over handled inside crash()
+        continue;
+      }
+
+      // Passed safely (below car) → dodge streak
+      if (!o.scored && o.y > car.y + CAR_H) {
+        o.scored = true;
+        dodgeStreak++;
+        score += 10;
+        if (dodgeStreak > 0 && dodgeStreak % 5 === 0) {
+          popup("Smooth operator 😎", { life: 1.4, color: "#9bf6ff" });
+        }
+      }
+
+      if (o.y > H + 50) obstacles.splice(i, 1);
+    }
+
+    // Move & test collectibles
+    for (let i = collectibles.length - 1; i >= 0; i--) {
+      const c = collectibles[i];
+      c.y += speed;
+      c.bob += dt * 5;
+
+      if (hit(c, car.x, car.y, CAR_W * 0.45)) {
+        if (c.boost) {
+          boostTime = 4.5;
+          popup("🚀 ZOOOM 🚀", { life: 1.6, color: "#fff", big: true });
+          sfxBoost();
+          showGif("boost", 2.2);
+        } else if (c.heart) {
+          lives = Math.min(MAX_LIVES, lives + 1);
+          popup("+1 Life ❤️", { life: 1.2, color: "#ff7b9c", big: true });
+          sfxCollect();
+        } else {
+          score += c.points;
+          popup("+" + c.points + " " + c.emoji, { life: 1.0, color: "#caffbf" });
+          sfxCollect();
+        }
+        resetIdle();
+        collectibles.splice(i, 1);
+        continue;
+      }
+      if (c.y > H + 50) collectibles.splice(i, 1);
+    }
+
+    // Track high score live
+    if (Math.floor(score) > highScore) highScore = Math.floor(score);
+  }
+
+  function crash(o) {
+    sfxCrash();
+    shake = 16;
+    dodgeStreak = 0;
+    lives--;
+    invuln = 1.4;   // brief blinking grace period
+
+    if (lives > 0) {
+      // Still alive — funny reaction, keep racing
+      showGif("crash", 1.6);
+      if (o && o.type === "banana") {
+        popup("Is that a banana?! 🍌", { life: 1.4, color: "#ffd166", big: true });
+      } else {
+        popup("💀 BRO 💀  (-1 ❤️)", { life: 1.4, color: "#ff5d5d", big: true });
+      }
+    } else {
+      // Out of hearts → game over
+      popup("Game Over 🏳️", { life: 1.6, color: "#ff5d5d", big: true });
+      if (Math.floor(score) > highScore) highScore = Math.floor(score);
+      state = STATE.OVER;
+    }
+  }
+
+  // ---------- Drawing ----------
+  function drawRoad() {
+    // Grass / surroundings
+    ctx.fillStyle = "#3ba55d";
+    ctx.fillRect(0, 0, W, H);
+
+    // Road
+    ctx.fillStyle = "#3a3a48";
+    ctx.fillRect(ROAD_LEFT, 0, ROAD_W, H);
+
+    // Road edges (curbs) — red/white stripes
+    const curbW = 10;
+    for (let y = -80 + roadOffset; y < H; y += 40) {
+      const even = (Math.floor((y + 80 - roadOffset) / 40) % 2) === 0;
+      ctx.fillStyle = even ? "#ff4d4d" : "#ffffff";
+      ctx.fillRect(ROAD_LEFT - curbW, y, curbW, 40);
+      ctx.fillRect(ROAD_RIGHT, y, curbW, 40);
+    }
+
+    // Lane dashes
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    for (let l = 1; l < LANES; l++) {
+      const x = ROAD_LEFT + LANE_W * l;
+      for (let y = -80 + roadOffset; y < H; y += 80) {
+        ctx.fillRect(x - 3, y, 6, 44);
+      }
+    }
+  }
+
+  function drawCar(x, y, tilt, scale) {
+    scale = scale || 1;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt);
+    ctx.scale(scale, scale);
+
+    const w = CAR_W, h = CAR_H;
+
+    // Rainbow boost trail (draw behind car)
+    // (handled separately before this in render)
+
+    // Rear wing
+    ctx.fillStyle = "#222";
+    ctx.fillRect(-w / 2 - 4, h / 2 - 12, w + 8, 8);
+
+    // Tyres
+    ctx.fillStyle = "#111";
+    roundRect(-w / 2 - 6, -h / 2 + 12, 10, 22, 4); ctx.fill();
+    roundRect(w / 2 - 4, -h / 2 + 12, 10, 22, 4); ctx.fill();
+    roundRect(-w / 2 - 6, h / 2 - 34, 10, 24, 4); ctx.fill();
+    roundRect(w / 2 - 4, h / 2 - 34, 10, 24, 4); ctx.fill();
+
+    // Body (cute rounded F1) — hot pink for Yara 💕
+    const grad = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+    grad.addColorStop(0, "#ff8fd8");
+    grad.addColorStop(1, "#ff2e9a");
+    ctx.fillStyle = grad;
+    roundRect(-w / 2, -h / 2, w, h, 16); ctx.fill();
+
+    // Nose cone
+    ctx.fillStyle = "#ff2e9a";
+    ctx.beginPath();
+    ctx.moveTo(-10, -h / 2);
+    ctx.lineTo(10, -h / 2);
+    ctx.lineTo(0, -h / 2 - 16);
+    ctx.closePath();
+    ctx.fill();
+
+    // Cockpit / halo
+    ctx.fillStyle = "#2b2b3a";
+    roundRect(-12, -10, 24, 30, 8); ctx.fill();
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 4, 12, Math.PI, 0);
+    ctx.stroke();
+
+    // Number "1" on the body (she's P1)
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 20px Trebuchet MS, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("1", 0, h / 2 - 22);
+
+    // Little heart on the nose
+    ctx.font = "14px serif";
+    ctx.fillText("💕", 0, -h / 2 + 8);
+
+    ctx.restore();
+  }
+
+  // Helper: rounded rectangle path
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawEmojiToken(item) {
+    ctx.save();
+    ctx.translate(item.x, item.y);
+
+    if (item.plate) {
+      // Draw a license plate look
+      const pw = 56, ph = 30;
+      ctx.fillStyle = "#fff";
+      roundRect(-pw / 2, -ph / 2, pw, ph, 6); ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "#1b3a8f"; ctx.stroke();
+      ctx.fillStyle = "#1b3a8f";
+      ctx.font = "bold 18px Trebuchet MS, monospace";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(item.emoji, 0, 1);
+    } else if (item.boost) {
+      // glowing rocket
+      const bob = Math.sin(item.bob) * 3;
+      ctx.shadowColor = "rgba(255,255,255,0.9)";
+      ctx.shadowBlur = 18;
+      ctx.font = "34px serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("🚀", 0, bob);
+      ctx.shadowBlur = 0;
+      ctx.font = "bold 10px Trebuchet MS, sans-serif";
+      ctx.fillStyle = "#fff";
+      ctx.fillText("BOOST", 0, 22);
+    } else {
+      const bob = Math.sin(item.bob) * 3;
+      ctx.font = "30px serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(item.emoji, 0, bob);
+    }
+    ctx.restore();
+  }
+
+  function drawObstacle(o) {
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.font = "32px serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    if (o.type === "cone") {
+      // cones don't spin (looks odd); others wobble
+      ctx.fillText(o.emoji, 0, 0);
+    } else {
+      ctx.rotate(Math.sin(o.spin) * 0.25);
+      ctx.fillText(o.emoji, 0, 0);
+    }
+    ctx.restore();
+  }
+
+  function drawRainbowTrail() {
+    // Draw fading rainbow circles along the trail
+    for (let i = 0; i < rainbowTrail.length; i++) {
+      const p = rainbowTrail[i];
+      const a = 1 - p.t / 0.6;
+      const hue = (i * 30 + performance.now() * 0.3) % 360;
+      ctx.fillStyle = "hsla(" + hue + ",95%,60%," + (a * 0.7) + ")";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y + p.t * 60, 18 * a + 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawHUD() {
+    // Score
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 26px Trebuchet MS, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("Score " + Math.floor(score), 16, 14);
+
+    ctx.font = "bold 16px Trebuchet MS, sans-serif";
+    ctx.fillStyle = "#ffe066";
+    ctx.fillText("Best " + highScore, 16, 44);
+
+    // Hearts (lives)
+    ctx.font = "22px serif";
+    ctx.textAlign = "right";
+    let hearts = "";
+    for (let i = 0; i < MAX_LIVES; i++) hearts += (i < lives ? "❤️" : "🤍");
+    ctx.fillText(hearts, W - 16, 44);
+
+    // Boost meter
+    if (boostTime > 0) {
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 16px Trebuchet MS, sans-serif";
+      ctx.fillText("🚀 BOOST " + boostTime.toFixed(1) + "s", W - 16, 16);
+    }
+
+    // Quote ticker (bottom band)
+    const bandH = 40;
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(0, H - bandH, W, bandH);
+    ctx.fillStyle = "#fff";
+    ctx.font = "italic bold 17px Trebuchet MS, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(quote, W / 2, H - bandH / 2);
+  }
+
+  function drawPopups() {
+    for (let i = 0; i < popups.length; i++) {
+      const p = popups[i];
+      const k = p.t / p.life;            // 0..1
+      const alpha = k < 0.85 ? 1 : (1 - (k - 0.85) / 0.15);
+      const pop = Math.min(1, p.t / 0.18); // grow-in
+      const size = (p.big ? 40 : 26) * (0.6 + pop * 0.4) * (1 + Math.sin(p.t * 8) * 0.03);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.font = "bold " + size + "px Trebuchet MS, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const y = H * 0.34 - i * (p.big ? 0 : 34);
+      // outline
+      ctx.lineWidth = 6; ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.strokeText(p.text, W / 2, y);
+      ctx.fillStyle = p.color;
+      ctx.fillText(p.text, W / 2, y);
+      ctx.restore();
+    }
+  }
+
+  function drawConfetti() {
+    for (let i = 0; i < confetti.length; i++) {
+      const c = confetti[i];
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.rotate(c.rot);
+      ctx.fillStyle = c.color;
+      ctx.fillRect(-c.size / 2, -c.size / 2, c.size, c.size * 0.6);
+      ctx.restore();
+    }
+  }
+
+  // ---------- Screens ----------
+  function drawStartScreen() {
+    drawRoad();
+
+    // Title
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff";
+    ctx.lineWidth = 6; ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.font = "bold 56px Trebuchet MS, sans-serif";
+    ctx.fillStyle = "#ffe066";
+    ctx.strokeText("YARA", W / 2, 165);
+    ctx.fillText("YARA", W / 2, 165);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 50px Trebuchet MS, sans-serif";
+    ctx.strokeText("DASH 🏎️", W / 2, 235);
+    ctx.fillText("DASH 🏎️", W / 2, 235);
+
+    // Cute car drawing
+    const bob = Math.sin(performance.now() * 0.004) * 6;
+    drawCar(W / 2, 400 + bob, Math.sin(performance.now() * 0.003) * 0.08, 1.4);
+
+    // Prompt (blinking)
+    const blink = (Math.sin(performance.now() * 0.006) + 1) / 2;
+    ctx.globalAlpha = 0.5 + blink * 0.5;
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 24px Trebuchet MS, sans-serif";
+    ctx.fillText("Press SPACE / Tap to race", W / 2, 560);
+    ctx.globalAlpha = 1;
+
+    // Rotating quote
+    ctx.fillStyle = "#caffbf";
+    ctx.font = "italic bold 18px Trebuchet MS, sans-serif";
+    ctx.fillText(quote, W / 2, 620);
+
+    // Tap hint zones
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.font = "14px Trebuchet MS, sans-serif";
+    ctx.fillText("◀ tap left to dodge left   ·   tap right to dodge right ▶", W / 2, 700);
+
+    drawConfetti();
+  }
+
+  function drawGameOver() {
+    // Dark overlay over a frozen-ish road
+    drawRoad();
+    drawCar(car.x, car.y, 0.3, 1);   // crashed car slightly tilted
+
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ff5d5d";
+    ctx.font = "bold 48px Trebuchet MS, sans-serif";
+    ctx.lineWidth = 6; ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.strokeText("DNF! 🏁", W / 2, 150);
+    ctx.fillText("DNF! 🏁", W / 2, 150);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 30px Trebuchet MS, sans-serif";
+    ctx.fillText("Score: " + Math.floor(score), W / 2, 230);
+    ctx.fillStyle = "#ffe066";
+    ctx.font = "bold 24px Trebuchet MS, sans-serif";
+    ctx.fillText("Session Best: " + highScore, W / 2, 270);
+
+    // A funny F1-style line on the crash screen
+    ctx.fillStyle = "#9bf6ff";
+    ctx.font = "italic bold 20px Trebuchet MS, sans-serif";
+    wrapText(quote, W / 2, 360, W - 80, 28);
+
+    // Restart prompt (blinking)
+    const blink = (Math.sin(performance.now() * 0.006) + 1) / 2;
+    ctx.globalAlpha = 0.5 + blink * 0.5;
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 22px Trebuchet MS, sans-serif";
+    ctx.fillText("Press SPACE / Tap to restart", W / 2, 480);
+    ctx.globalAlpha = 1;
+
+    drawConfetti();
+  }
+
+  // Helper: wrap text into multiple centered lines
+  function wrapText(text, cx, cy, maxW, lh) {
+    const words = text.split(" ");
+    let line = "";
+    let y = cy;
+    for (let n = 0; n < words.length; n++) {
+      const test = line + words[n] + " ";
+      if (ctx.measureText(test).width > maxW && n > 0) {
+        ctx.fillText(line.trim(), cx, y);
+        line = words[n] + " ";
+        y += lh;
+      } else {
+        line = test;
+      }
+    }
+    ctx.fillText(line.trim(), cx, y);
+  }
+
+  // ---------- Main render ----------
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    if (state === STATE.START) {
+      drawStartScreen();
+      return;
+    }
+    if (state === STATE.OVER) {
+      drawGameOver();
+      return;
+    }
+
+    // PLAY: apply screen shake
+    ctx.save();
+    if (shake > 0) {
+      const sx = (Math.random() - 0.5) * shake;
+      const sy = (Math.random() - 0.5) * shake;
+      ctx.translate(sx, sy);
+    }
+
+    drawRoad();
+
+    // collectibles under car
+    for (let i = 0; i < collectibles.length; i++) drawEmojiToken(collectibles[i]);
+    for (let i = 0; i < obstacles.length; i++) drawObstacle(obstacles[i]);
+
+    // rainbow trail + car
+    if (boostTime > 0) drawRainbowTrail();
+    // Blink while invincible after a hit
+    if (invuln > 0 && (Math.floor(invuln * 12) % 2 === 0)) {
+      ctx.globalAlpha = 0.35;
+    }
+    drawCar(car.x, car.y, car.tilt, 1);
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+
+    // Birthday flash (over everything)
+    if (flash > 0) {
+      ctx.fillStyle = "rgba(255,255,255," + (flash * 0.8) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    drawConfetti();
+    drawHUD();
+    drawPopups();
+  }
+
+  // ---------- Loop ----------
+  let prevState = -1;
+  function loop(now) {
+    let dt = (now - last) / 1000;
+    last = now;
+    if (dt > 0.05) dt = 0.05;   // clamp big gaps (tab switch etc.)
+
+    // React to screen changes for the GIFs
+    if (state !== prevState) {
+      if (state === STATE.OVER) { clearSpam(); showGif("gameover", 0); }  // stays on the die screen
+      else if (state === STATE.PLAY) showGif("start", 2.5);  // pops up right as the race begins
+      else hideGif();                                        // start screen stays clean (shows her name)
+      prevState = state;
+    }
+
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
