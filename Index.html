@@ -63,7 +63,6 @@
 <div id="wrap">
   <canvas id="game"></canvas>
   <img id="gifLayer" alt="" />
-  <div id="hint">Arrow keys / WASD to move · SPACE to start · Tap top/bottom on mobile</div>
 </div>
 
 <script>
@@ -106,6 +105,14 @@
     ],
     birthday: "",   // shown on the secret score-2210 celebration
     gameover: "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExY3MwenZsamUydjZrNjk0cWQ5ZzNucXNoYWs2OWZ6Njgyd3Brcmt1ciZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1GU8lkcF6iNYvhfc9X/giphy.gif", // the "you died" screen
+    // Secret pool — only the rare mystery box ❓ spawns these.
+    mystery: [
+      "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExYmN6bzFleXR5bTI4MjF6NDV3ZWxuYTlsc29nbmpocHZ4NGprenhnaCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/B4l6yxB91AUHU0Zhh8/giphy.gif",
+      "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExcXN5aDRxcHA1aTJnc3Q3NmgxcnN1cjVmbmc4cHNxODgybTV1azU4YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/RuY7ZLVJxfEEAKzTPj/giphy.gif",
+      "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDFkem5zam1kZjBtams1OXh0MHhwOXFmYWFndXBpOXZib2Jsa2E4aiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/1cJ5ao0hzlDmR0P0FU/giphy.gif",
+      "https://media.giphy.com/media/v1.Y2lkPWVjZjA1ZTQ3ODRza2t5MGt6Zm81ZHhiMXNpamNveGt4a2kxZnExOGdlMXNjOHJ5ZyZlcD12MV9naWZzX3NlYXJjaCZjdD1n/MTMq0JLFzhdtELkQ9y/giphy.gif",
+      "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExenY3NDBqY2Vwb2VoZHAyaXVzY2J3bXNyYjh0cXRhZTBmMWZtMzU4eCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/bFVBCmMPHkNLgWAVZk/giphy.gif",
+    ],
   };
 
   // ---------- GIF overlay control ----------
@@ -134,10 +141,16 @@
     gifLayer.classList.remove("show");
   }
 
-  // Collect every GIF link (flattening the array slots) into one pool.
+  // These pools fire ONLY on their own dedicated event and must never leak
+  // into the random pop-ups or the high-score GIF STORM.
+  const EXCLUSIVE_GIFS = { mystery: true, score67: true };
+
+  // Collect every GIF link (flattening the array slots) into one pool,
+  // skipping the exclusive ones above.
   function allGifUrls() {
     const all = [];
     for (const k in GIFS) {
+      if (EXCLUSIVE_GIFS[k]) continue;
       const v = GIFS[k];
       if (Array.isArray(v)) { for (const u of v) if (u) all.push(u); }
       else if (v) all.push(v);
@@ -151,8 +164,8 @@
     for (const el of spamEls) el.remove();
     spamEls = [];
   }
-  function spamGifs(count, durationMs) {
-    const pool = allGifUrls();
+  function spamGifs(count, durationMs, poolOverride) {
+    const pool = (poolOverride && poolOverride.length) ? poolOverride.filter(Boolean) : allGifUrls();
     if (!pool.length) return;
     const wrap = document.getElementById("wrap");
     clearSpam();
@@ -339,7 +352,7 @@
   // ---------- Web Audio (optional, degrades gracefully) ----------
   let audioCtx = null;
   function initAudio() {
-    if (audioCtx) return;
+    if (audioCtx) { if (audioCtx.state === "suspended") audioCtx.resume(); return; }
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (AC) audioCtx = new AC();
@@ -459,6 +472,16 @@
     // rarely a boost. Keep it forgiving: never fully block all lanes.
     const r = Math.random();
     const lane = (Math.random() * LANES) | 0;
+
+    // Mystery box ❓ — rolls on its own so it shows up fairly often.
+    if (Math.random() < 0.04) {
+      collectibles.push({
+        x: laneX(lane), y: -40, lane: lane,
+        type: "mystery", emoji: "❓", points: 0, r: 22, mystery: true,
+        bob: Math.random() * Math.PI * 2,
+      });
+      return;
+    }
 
     // Boost: very rare AND gated by a cooldown so it never feels spammy.
     if (boostCooldown <= 0 && r < 0.03) {
@@ -692,6 +715,12 @@
           lives = Math.min(MAX_LIVES, lives + 1);
           popup("+1 Life ❤️", { life: 1.2, color: "#ff7b9c", big: true });
           sfxCollect();
+        } else if (c.mystery) {
+          // Mystery box! Show ONE random secret GIF.
+          showGif("mystery", 3.0);
+          popup("❓ MYSTERY!! ❓", { life: 2.2, color: "#d8b4fe", big: true });
+          shake = Math.max(shake, 8);
+          sfxBoost();
         } else {
           score += c.points;
           popup("+" + c.points + " " + c.emoji, { life: 1.0, color: "#caffbf" });
@@ -859,6 +888,19 @@
       ctx.font = "bold 10px Trebuchet MS, sans-serif";
       ctx.fillStyle = "#fff";
       ctx.fillText("BOOST", 0, 22);
+    } else if (item.mystery) {
+      // Pulsing rainbow mystery box
+      const bob = Math.sin(item.bob) * 3;
+      const hue = (performance.now() * 0.2) % 360;
+      ctx.shadowColor = "hsl(" + hue + ",90%,60%)";
+      ctx.shadowBlur = 20;
+      ctx.font = "36px serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("❓", 0, bob);
+      ctx.shadowBlur = 0;
+      ctx.font = "bold 10px Trebuchet MS, sans-serif";
+      ctx.fillStyle = "#fff";
+      ctx.fillText("???", 0, 22);
     } else {
       const bob = Math.sin(item.bob) * 3;
       ctx.font = "30px serif";
