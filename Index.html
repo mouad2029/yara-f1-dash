@@ -118,19 +118,26 @@
   // ---------- GIF overlay control ----------
   const gifLayer = document.getElementById("gifLayer");
   let gifTimer = null;
+  const lastGifByKey = {};   // remembers the last pick per slot to avoid repeats
   // Hide the broken-image icon if a link fails / there's no internet.
   gifLayer.addEventListener("error", function () { hideGif(); });
   function showGif(key, seconds) {
     let url = GIFS[key];
-    // A slot can be an array of links — pick a random one each time.
+    // A slot can be an array of links — pick a random one, never the same twice in a row.
     if (Array.isArray(url)) {
       const pool = url.filter(Boolean);
       if (!pool.length) { hideGif(); return; }
-      url = pool[(Math.random() * pool.length) | 0];
+      if (pool.length === 1) {
+        url = pool[0];
+      } else {
+        do { url = pool[(Math.random() * pool.length) | 0]; } while (url === lastGifByKey[key]);
+      }
+      lastGifByKey[key] = url;
     }
     if (!url) { hideGif(); return; }
     if (gifTimer) { clearTimeout(gifTimer); gifTimer = null; }
-    if (gifLayer.getAttribute("src") !== url) gifLayer.src = url;
+    // Always (re)assign so the new pick applies and animated GIFs restart.
+    gifLayer.src = url;
     gifLayer.classList.add("show");
     if (seconds && seconds > 0) {
       gifTimer = setTimeout(hideGif, seconds * 1000);
